@@ -38,13 +38,18 @@ description: "约束 AI 在连续性编码任务中的工作方式：强制改�
 ---
 
 ## 协议2：改动前检查
+准备修改任何**代码文件**前，必须执行影响检查。
 
-准备修改任何文件前，必须执行影响检查。
+### 白名单（跳过检查）
+以下文件无需影响检查，直接动手：
+- `*.md`（所有文档）
+- `README*` / `LICENSE` / `.gitignore`
+- `memory.md` / `PROJECT_MEMORY.md` / `skills/_meta.json`（传火自身文件）
+- `.impact-index.json`
 
 ### 步骤
-
 1. **判断风险等级**：检查目标文件是否在 PROJECT_MEMORY.md 的高风险清单中
-2. **调用脚本**：`bash <skill-path>/scripts/check-impact.sh <目标文件>`
+2. **调用脚本**：`chuanhuo check <目标文件>`（或 `bash $CHUANSHUO_HOME/scripts/check-impact.sh <目标文件>`）
 3. **阅读影响报告**
 4. **分级处理**：
    - **高风险**（在清单中）→ 输出报告，**等待用户确认**后才动手
@@ -87,31 +92,28 @@ description: "约束 AI 在连续性编码任务中的工作方式：强制改�
 ---
 
 ## 协议3：踩坑标注
-
 ### 触发条件
-
 - 发生"修B破A"
 - 发现反直觉的依赖关系
 - 踩了一个坑并修复后
-
 ### 步骤
-
 1. **在相关代码旁补 #@ 标注**
-2. **运行** `bash <skill-path>/scripts/extract-annotations.sh <目录>` 更新索引
+2. **运行** `chuanhuo extract` 更新索引
 3. **如果是通用坑** → 写入 `skills/<pitfall-name>.md` 并更新 `skills/_meta.json`
-
 ### 标注规范
-
+**推荐使用以下 3 种**（覆盖 90% 场景）：
+```
+#@depends-on: <file>#<symbol> | <自然语言描述>   # 声明依赖
+#@impact: <自然语言描述>                          # 声明影响范围
+#@pitfall: <自然语言描述>                          # 踩坑警告
+```
+兼容保留（仅在确有需要时使用，AI 标注时优先选上述 3 种）：
+```
+#@flow: <condition> → <result> | <自然语言描述>    # 条件流（可用 pitfall 替代）
+#@route: <pattern> → <handler>                     # 路由映射
+#@state: <state> +<event> → <next>                 # 状态机
+```
 混合语法：竖线前是结构化字段（脚本解析），竖线后是自然语言（AI 理解上下文）。
-
-```
-#@depends-on: <file>#<symbol> | <自然语言描述>
-#@impact: <自然语言描述>
-#@flow: <condition> → <result> | <自然语言描述>
-#@route: <pattern> → <handler>
-#@state: <state> +<event> → <next>
-#@pitfall: <自然语言描述>
-```
 
 ### 标注示例
 
@@ -133,16 +135,17 @@ function validateToken(token: string) { ... }
 ---
 
 ## 协议4：状态更新
-
-### 触发条件
-
-- 会话结束前
-- 做出重大决策后
-- 完成一个阶段性任务后
-
+### 触发条件（按优先级）
+- **完成一个阶段性任务 / todo 后**（主触发点，确保不丢失进度）
+- **做出重大决策后**
+- **会话结束前**（兜底，防止遗漏）
 ### 步骤
-
-1. **更新 memory.md**
+1. **用 `chuanhuo memory` 更新 memory.md**（自动带时间戳）
+   - `chuanhuo memory status "<当前状态>"` — 更新当前状态
+   - `chuanhuo memory decision "<决策内容>"` — 追加决策（自动保留最近 5 条）
+   - `chuanhuo memory issue "<问题描述>"` — 追加活跃问题
+   - `chuanhuo memory deadend "<不可行方案>"` — 追加不要再试的方案
+   - `chuanhuo memory resolve "<关键词>"` — 移除已解决的活跃问题
 2. **只记四类信息**：
    - 当前状态（正在做什么、进度）
    - 近期决策（最近 5 条，含原因）
@@ -216,28 +219,55 @@ function validateToken(token: string) { ... }
 
 ## 脚本说明
 
+### 统一入口：`chuanhuo`
+所有命令通过 `chuanhuo` 包装脚本调用，自动定位 skill 根目录（通过 `$CHUANSHUO_HOME` 或脚本路径推断）。
+```
+chuanhuo init [dir]              # 初始化项目结构
+chuanhuo uninstall [dir]         # 卸载传火结构
+chuanhuo extract [dir] [opts]    # 扫描标注生成索引
+chuanhuo check <file> [opts]     # 检查文件影响范围
+chuanhuo memory <action> <text>  # 更新 memory.md
+chuanhuo lint [dir]              # 项目健康检查
+```
+也可直接调用底层脚本：`bash $CHUANSHUO_HOME/scripts/<script>.sh`
+
 ### init-project.sh
-
 初始化项目结构，创建 PROJECT_MEMORY.md、memory.md、skills/ 目录。
-
 ```bash
-bash <skill-path>/scripts/init-project.sh <项目根目录>
+chuanhuo init <项目根目录>
+# 卸载：chuanhuo uninstall <项目根目录>
 ```
 
 ### extract-annotations.sh
-
 扫描代码中的 #@ 标注，生成 .impact-index.json 索引。
-
 ```bash
-bash <skill-path>/scripts/extract-annotations.sh [扫描目录，默认 src/]
+chuanhuo extract [扫描目录]              # 全量扫描
+chuanhuo extract --since HEAD~1          # 增量：只扫 git diff 变更文件
+chuanhuo extract --prune                 # 清理指向不存在文件的标注
+chuanhuo extract --check-meta            # 校验 _meta.json 一致性
 ```
 
 ### check-impact.sh
-
 检查指定文件的影响范围，输出影响报告。
-
 ```bash
-bash <skill-path>/scripts/check-impact.sh <目标文件>
+chuanhuo check <目标文件>                # 文本报告
+chuanhuo check <目标文件> --json         # JSON 格式（供 AI 可靠解析）
+chuanhuo check <目标文件> --no-skip      # 强制检查白名单文件
+```
+
+### update-memory.sh
+向 memory.md 追加带时间戳的状态/决策/问题。
+```bash
+chuanhuo memory status "正在做登录模块"
+chuanhuo memory decision "采用 JWT，原因：无状态"
+chuanhuo memory issue "登录接口偶发 500"
+chuanhuo memory resolve "登录接口偶发 500"
+```
+
+### lint.sh
+检查项目健康度：PROJECT_MEMORY.md 行数、_meta.json 一致性、索引是否过期。
+```bash
+chuanhuo lint
 ```
 
 ---

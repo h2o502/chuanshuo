@@ -1,0 +1,105 @@
+#!/bin/bash
+# chuanhuo — 传火统一入口脚本
+#
+# 用法：chuanhuo <command> [args...]
+# 自动定位 skill 根目录（通过 $CHUANSHUO_HOME 或脚本自身路径）
+#
+# 命令：
+#   init [dir]              初始化项目传火结构
+#   uninstall [dir]         卸载传火结构
+#   extract [dir] [opts]    扫描标注生成索引
+#   check <file> [opts]     检查文件影响范围
+#   memory <action> <text>  更新 memory.md
+#   lint [dir]              项目健康检查
+#   --help, -h              显示帮助
+
+set -euo pipefail
+
+# ===== 定位 skill 根目录 =====
+if [ -n "${CHUANSHUO_HOME:-}" ] && [ -d "$CHUANSHUO_HOME/scripts" ]; then
+  SCRIPTS_DIR="$CHUANSHUO_HOME/scripts"
+else
+  # 通过脚本自身路径推断（支持 symlink）
+  SELF="$0"
+  if [ -L "$SELF" ]; then
+    SELF=$(readlink -f "$SELF" 2>/dev/null || echo "$SELF")
+  fi
+  SCRIPTS_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+  # 如果是从 PATH 里的 symlink 调用，尝试向上找 chuanhuo/scripts
+  if [ ! -f "$SCRIPTS_DIR/init-project.sh" ]; then
+    # 尝试常见安装路径
+    for candidate in \
+      "$HOME/.local/share/chuanshuo/chuanhuo/scripts" \
+      "$HOME/.chuanshuo/chuanhuo/scripts" \
+      "/usr/local/share/chuanshuo/chuanhuo/scripts"; do
+      if [ -f "$candidate/init-project.sh" ]; then
+        SCRIPTS_DIR="$candidate"
+        break
+      fi
+    done
+  fi
+fi
+
+print_help() {
+  cat <<'HELP'
+chuanhuo — 传火统一入口
+
+用法：chuanhuo <command> [args...]
+
+命令：
+  init [dir]              初始化项目传火结构
+  uninstall [dir]         卸载传火结构
+  extract [dir] [opts]    扫描 #@ 标注生成依赖索引
+  check <file> [opts]     检查文件影响范围
+  memory <action> <text>  更新 memory.md（status/decision/issue/deadend/resolve）
+  lint [dir]              项目健康检查
+  --help, -h              显示本帮助
+
+环境变量：
+  CHUANSHUO_HOME  指定传火 skill 根目录（含 scripts/ 的目录）
+
+各命令的详细选项请运行：chuanhuo <command> --help
+
+示例：
+  chuanhuo init .
+  chuanhuo extract src/
+  chuanhuo check src/auth/token.ts --json
+  chuanhuo memory decision "采用 JWT 替代 session"
+  chuanhuo lint
+HELP
+}
+
+if [ $# -lt 1 ]; then
+  print_help
+  exit 1
+fi
+
+COMMAND="$1"
+shift
+
+case "$COMMAND" in
+  --help|-h) print_help; exit 0 ;;
+
+  init)
+    exec bash "$SCRIPTS_DIR/init-project.sh" "$@" ;;
+
+  uninstall)
+    exec bash "$SCRIPTS_DIR/init-project.sh" --uninstall "$@" ;;
+
+  extract)
+    exec bash "$SCRIPTS_DIR/extract-annotations.sh" "$@" ;;
+
+  check)
+    exec bash "$SCRIPTS_DIR/check-impact.sh" "$@" ;;
+
+  memory)
+    exec bash "$SCRIPTS_DIR/update-memory.sh" "$@" ;;
+
+  lint)
+    exec bash "$SCRIPTS_DIR/lint.sh" "$@" ;;
+
+  *)
+    echo "错误：未知命令 '$COMMAND'" >&2
+    echo "运行 chuanhuo --help 查看可用命令" >&2
+    exit 1 ;;
+esac
