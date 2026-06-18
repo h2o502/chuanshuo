@@ -61,6 +61,10 @@ if [ -f ".gitignore" ]; then
   if grep -q '.impact-index.json' .gitignore; then
     echo "ℹ️ .impact-index.json 已在 .gitignore 中"
   else
+    # 确保文件末尾有换行，避免追加时粘连到上一行
+    if [ -s ".gitignore" ] && [ "$(tail -c1 .gitignore)" != "" ]; then
+      printf '\n' >> .gitignore
+    fi
     echo "" >> .gitignore
     echo "# 传火：自动生成的依赖索引" >> .gitignore
     echo ".impact-index.json" >> .gitignore

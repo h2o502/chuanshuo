@@ -9,6 +9,12 @@ set -euo pipefail
 SCAN_DIR="${1:-src}"
 OUTPUT_FILE="${2:-.impact-index.json}"
 
+# 依赖检查
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "错误：未找到 python3，本脚本依赖 python3 生成索引。" >&2
+  exit 2
+fi
+
 # 支持的标注类型
 # #@depends-on: <file>#<symbol> | <描述>
 # #@impact: <描述>
@@ -29,6 +35,7 @@ TMP_FILE=$(mktemp)
 
 # 扫描所有包含 #@ 的行
 # 输出格式：文件路径:行号:标注内容
+# 默认排除常见无关目录，避免误扫依赖与构建产物
 grep -rn '#@' "$SCAN_DIR" \
   --include='*.ts' \
   --include='*.tsx' \
@@ -40,6 +47,14 @@ grep -rn '#@' "$SCAN_DIR" \
   --include='*.rs' \
   --include='*.vue' \
   --include='*.svelte' \
+  --exclude-dir='node_modules' \
+  --exclude-dir='.git' \
+  --exclude-dir='dist' \
+  --exclude-dir='build' \
+  --exclude-dir='target' \
+  --exclude-dir='vendor' \
+  --exclude-dir='.next' \
+  --exclude-dir='__pycache__' \
   2>/dev/null > "$TMP_FILE" || true
 
 if [ ! -s "$TMP_FILE" ]; then
@@ -79,19 +94,27 @@ files_data = defaultdict(lambda: {
     'lines': []
 })
 
+# grep -rn 输出格式：文件路径:行号:内容
+# 文件路径可能含冒号（Windows 盘符 C:\、含冒号的目录名），
+# 内容也可能含冒号（如 "#@depends-on: xxx"）。
+# 唯一可靠的锚点是"行号为纯数字且两侧有冒号"。
+# 用正则非贪婪匹配路径，\d+ 匹配行号，剩余为内容。
+LINE_RE = re.compile(r'^(.+?):(\d+):(.*)$')
+
 with open(tmp_file, 'r', encoding='utf-8') as f:
     for line in f:
         line = line.rstrip('\n')
         if not line or '#@' not in line:
             continue
 
-        # 解析 文件路径:行号:内容
-        parts = line.split(':', 2)
-        if len(parts) < 3:
+        m = LINE_RE.match(line)
+        if not m:
             continue
-        filepath = parts[0]
-        lineno = parts[1]
-        content = parts[2].strip()
+        filepath = m.group(1)
+        lineno = m.group(2)
+        content = m.group(3).strip()
+        if not content:
+            continue
 
         file_info = files_data[filepath]
         file_info['lines'].append(int(lineno))

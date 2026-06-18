@@ -9,6 +9,12 @@ set -euo pipefail
 TARGET_FILE="${1:-}"
 INDEX_FILE="${2:-.impact-index.json}"
 
+# 依赖检查
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "错误：未找到 python3，本脚本依赖 python3 解析索引。" >&2
+  exit 2
+fi
+
 if [ -z "$TARGET_FILE" ]; then
   echo "用法：bash check-impact.sh <目标文件> [索引文件]"
   exit 1
@@ -43,9 +49,13 @@ is_high_risk() {
   local pattern regex
   while IFS= read -r pattern; do
     [ -z "$pattern" ] && continue
-    # 将 glob pattern 转为正则：** → .*，* → [^/]*，. → \.
-    regex=$(echo "$pattern" | sed 's/\*\*/§§§/g; s/\*/[^\/]*/g; s/§§§/.*/g; s/\./\\./g')
-    if echo "$file" | grep -qE "$regex" 2>/dev/null; then
+    # glob → 正则：先保护 **，再转义所有正则元字符，最后还原 * 语义
+    # 步骤：** → \x01（占位），转义元字符，* → [^/]*，\x01 → .*
+    regex=$(printf '%s' "$pattern" \
+      | sed 's/\*\*/\x01/g' \
+      | sed 's/[.+?^$(){}|\\]/\\&/g' \
+      | sed 's/\*/[^\/]*/g; s/\x01/.*/g')
+    if printf '%s' "$file" | grep -qE "^${regex}$" 2>/dev/null; then
       echo "high"
       return
     fi
@@ -74,9 +84,9 @@ FILE_ANNOTATIONS=$(grep -n '#@' "$TARGET_FILE" 2>/dev/null || true)
 if [ -z "$FILE_ANNOTATIONS" ]; then
   echo "  （无标注）"
 else
-  echo "$FILE_ANNOTATIONS" | while IFS= read -r line; do
-    echo "  $line" | sed 's/^/  /'
-  done
+  while IFS= read -r line; do
+    echo "  $line"
+  done <<< "$FILE_ANNOTATIONS"
 fi
 
 echo ""
